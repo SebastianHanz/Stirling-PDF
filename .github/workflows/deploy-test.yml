@@ -1,0 +1,165 @@
+name: PR Deployment
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+    paths:
+      - '**.java'
+      - '**.html'
+      - '**.css'
+      - '**.js'
+      - '**.gradle'
+      - 'build.gradle'
+      - 'settings.gradle'
+      - 'gradle.properties'
+
+env:
+  BASE_DOMAIN: pr.dev.stirlingpdf.com
+  BASE_PORT: 5000  # Starting port number
+
+jobs:
+  check-changes:
+    runs-on: ubuntu-latest
+    if: github.event.action != 'closed'
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+    
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetches all history for all branches and tags
+          
+      - name: Check for relevant file changes
+        id: check
+        run: |
+          git fetch origin ${{ github.base_ref }}
+          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD)
+          echo "Changed files:"
+          echo "$CHANGED_FILES"
+          
+          if echo "$CHANGED_FILES" | grep -qE '\.(java|html|css|js|gradle)$|build\.gradle|settings\.gradle|gradle\.properties'; then
+            echo "Relevant files changed, proceeding with deployment"
+            echo "should_run=true" >> $GITHUB_OUTPUT
+          else
+            echo "No relevant files changed, skipping deployment"
+            echo "should_run=false" >> $GITHUB_OUTPUT
+          fi
+
+  deploy-pr:
+    needs: check-changes
+    if: needs.check-changes.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up JDK and Gradle
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          gradle-version: 8.7
+
+      - name: Calculate PR Port
+        id: pr-port
+        run: |
+          PR_NUMBER=${{ github.event.pull_request.number }}
+          PORT=$((BASE_PORT + PR_NUMBER))
+          echo "port=$PORT" >> $GITHUB_OUTPUT
+          echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+
+      - name: Run Gradle Command
+        run: ./gradlew clean build
+        env:
+          DOCKER_ENABLE_SECURITY: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_API }}
+
+      - name: Build and push PR-specific image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ secrets.DOCKER_HUB_USERNAME }}/test:pr-${{ github.event.pull_request.number }}
+          build-args: VERSION_TAG=alpha
+          platforms: linux/amd64
+
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            # Create PR-specific directories
+            mkdir -p /stirling/PR-${{ steps.pr-port.outputs.pr_number }}/{data,config,logs}
+            
+            # Create or update docker-compose file
+            cat > /stirling/PR-${{ steps.pr-port.outputs.pr_number }}/docker-compose.yml << 'EOL'
+            version: '3.8'
+            services:
+              stirling-pdf:
+                container_name: stirling-pdf-pr-${{ steps.pr-port.outputs.pr_number }}
+                image: ${{ secrets.DOCKER_HUB_USERNAME }}/test:pr-${{ steps.pr-port.outputs.pr_number }}
+                ports:
+                  - "${{ steps.pr-port.outputs.port }}:8080"
+                volumes:
+                  - /stirling/PR-${{ steps.pr-port.outputs.pr_number }}/data:/usr/share/tessdata:rw
+                  - /stirling/PR-${{ steps.pr-port.outputs.pr_number }}/config:/configs:rw
+                  - /stirling/PR-${{ steps.pr-port.outputs.pr_number }}/logs:/logs:rw
+                environment:
+                  DOCKER_ENABLE_SECURITY: "true"
+                  SECURITY_ENABLELOGIN: "true"
+                  SYSTEM_DEFAULTLOCALE: en-GB
+                  UI_APPNAME: "Stirling-PDF PR-${{ steps.pr-port.outputs.pr_number }}"
+                  UI_HOMEDESCRIPTION: "PR-${{ steps.pr-port.outputs.pr_number }} for Stirling-PDF Latest"
+                  UI_APPNAMENAVBAR: "PR#${{ steps.pr-port.outputs.pr_number }}"
+                  SYSTEM_MAXFILESIZE: "100"
+                  SYSTEM_ROOTURIPATH: "/pr-${{ steps.pr-port.outputs.pr_number }}"
+                  METRICS_ENABLED: "true"
+                  SYSTEM_GOOGLEVISIBILITY: "false"
+                restart: on-failure:5
+            EOL
+            
+            # Start or restart the container
+            cd /stirling/PR-${{ steps.pr-port.outputs.pr_number }}
+            docker-compose pull
+            docker-compose up -d
+
+  cleanup:
+    runs-on: ubuntu-latest
+    if: github.event.action == 'closed'
+    
+    steps:
+      - name: Calculate PR Port
+        id: pr-port
+        run: |
+          PR_NUMBER=${{ github.event.pull_request.number }}
+          PORT=$((BASE_PORT + PR_NUMBER))
+          echo "port=$PORT" >> $GITHUB_OUTPUT
+          echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+
+      - name: Cleanup PR deployment
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            # Stop and remove the container
+            cd /stirling/PR-${{ steps.pr-port.outputs.pr_number }}
+            docker-compose down
+            
+            # Remove PR-specific directories
+            rm -rf /stirling/PR-${{ steps.pr-port.outputs.pr_number }}
+            
+            # Remove the Docker image
+            docker rmi ${{ secrets.DOCKER_HUB_USERNAME }}/test:pr-${{ steps.pr-port.outputs.pr_number }}
