@@ -27,7 +27,7 @@ ext {
 }
 
 group = "stirling.software"
-version = "0.36.5"
+version = "0.36.6"
 
 
 java {
@@ -257,7 +257,7 @@ spotless {
 //        rules=['unused-dependency']
 //    }
 tasks.wrapper {
-    gradleVersion = "8.7"
+    gradleVersion = "8.12"
 }
 //tasks.withType(JavaCompile) {
 //    options.compilerArgs << "-Xlint:deprecation"
