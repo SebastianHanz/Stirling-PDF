@@ -121,6 +121,7 @@ clientWebUI/
 *.rar
 *.db
 /build
+/usr
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
