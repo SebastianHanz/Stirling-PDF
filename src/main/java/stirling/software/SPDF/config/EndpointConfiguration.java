@@ -1,5 +1,6 @@
 package stirling.software.SPDF.config;
 
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -125,6 +126,7 @@ public class EndpointConfiguration {
         addEndpointToGroup("Convert", "url-to-pdf");
         addEndpointToGroup("Convert", "markdown-to-pdf");
         addEndpointToGroup("Convert", "pdf-to-csv");
+        addEndpointToGroup("Convert", "pdf-to-markdown");
 
         // Adding endpoints to "Security" group
         addEndpointToGroup("Security", "add-password");
@@ -135,6 +137,7 @@ public class EndpointConfiguration {
         addEndpointToGroup("Security", "remove-cert-sign");
         addEndpointToGroup("Security", "sanitize-pdf");
         addEndpointToGroup("Security", "auto-redact");
+        addEndpointToGroup("Security", "redact");
 
         // Adding endpoints to "Other" group
         addEndpointToGroup("Other", "ocr-pdf");
@@ -180,7 +183,6 @@ public class EndpointConfiguration {
         addEndpointToGroup("Python", "extract-image-scans");
         addEndpointToGroup("Python", "html-to-pdf");
         addEndpointToGroup("Python", "url-to-pdf");
-        addEndpointToGroup("Python", "pdf-to-img");
         addEndpointToGroup("Python", "file-to-pdf");
 
         // openCV
@@ -234,6 +236,7 @@ public class EndpointConfiguration {
         addEndpointToGroup("Java", "markdown-to-pdf");
         addEndpointToGroup("Java", "show-javascript");
         addEndpointToGroup("Java", "auto-redact");
+        addEndpointToGroup("Java", "redact");
         addEndpointToGroup("Java", "pdf-to-csv");
         addEndpointToGroup("Java", "split-by-size-or-count");
         addEndpointToGroup("Java", "overlay-pdf");
@@ -241,6 +244,7 @@ public class EndpointConfiguration {
         addEndpointToGroup("Java", REMOVE_BLANKS);
         addEndpointToGroup("Java", "pdf-to-text");
         addEndpointToGroup("Java", "remove-image-pdf");
+        addEndpointToGroup("Java", "pdf-to-markdown");
 
         // Javascript
         addEndpointToGroup("Javascript", "pdf-organizer");
@@ -256,29 +260,37 @@ public class EndpointConfiguration {
         // Weasyprint dependent endpoints
         addEndpointToGroup("Weasyprint", "html-to-pdf");
         addEndpointToGroup("Weasyprint", "url-to-pdf");
+        addEndpointToGroup("Weasyprint", "markdown-to-pdf");
 
         // Pdftohtml dependent endpoints
         addEndpointToGroup("Pdftohtml", "pdf-to-html");
+        addEndpointToGroup("Pdftohtml", "pdf-to-markdown");
 
         // disabled for now while we resolve issues
         disableEndpoint("pdf-to-pdfa");
     }
 
     private void processEnvironmentConfigs() {
-        List<String> endpointsToRemove = applicationProperties.getEndpoints().getToRemove();
-        List<String> groupsToRemove = applicationProperties.getEndpoints().getGroupsToRemove();
-        if (!bookAndHtmlFormatsInstalled) {
-            groupsToRemove.add("Calibre");
-        }
-        if (endpointsToRemove != null) {
-            for (String endpoint : endpointsToRemove) {
-                disableEndpoint(endpoint.trim());
-            }
-        }
+        if (applicationProperties != null && applicationProperties.getEndpoints() != null) {
+            List<String> endpointsToRemove = applicationProperties.getEndpoints().getToRemove();
+            List<String> groupsToRemove = applicationProperties.getEndpoints().getGroupsToRemove();
 
-        if (groupsToRemove != null) {
-            for (String group : groupsToRemove) {
-                disableGroup(group.trim());
+            if (!bookAndHtmlFormatsInstalled) {
+                if (groupsToRemove == null) {
+                    groupsToRemove = new ArrayList<>();
+                }
+                groupsToRemove.add("Calibre");
+            }
+            if (endpointsToRemove != null) {
+                for (String endpoint : endpointsToRemove) {
+                    disableEndpoint(endpoint.trim());
+                }
+            }
+
+            if (groupsToRemove != null) {
+                for (String group : groupsToRemove) {
+                    disableGroup(group.trim());
+                }
             }
         }
     }
